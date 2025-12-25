@@ -1,0 +1,504 @@
+openapi: 3.0.3
+info:
+  title: OpenSSL Certificate Agent API
+  description: |
+    API for generating and managing SSL/TLS certificates.
+    
+    All certificate operations return temporary download links (valid for 60 minutes).
+  version: 2.0.0
+
+servers:
+  - url: http://10.67.67.50:8025
+    description: Development server
+
+tags:
+  - name: Keys
+    description: Private/Public key operations
+  - name: CSR
+    description: Certificate Signing Request operations
+  - name: Certificates
+    description: Certificate generation and management
+  - name: Downloads
+    description: File download endpoints
+
+paths:
+  /api/v1/keys/generate:
+    post:
+      tags:
+        - Keys
+      summary: Generate a new key pair
+      description: Generate RSA or ECDSA private/public key pair. Returns download links.
+      operationId: generateKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateKeyRequest'
+            examples:
+              rsa2048:
+                summary: RSA 2048-bit key
+                value:
+                  algorithm: rsa
+                  key_size: 2048
+              ecdsa:
+                summary: ECDSA P-256 key
+                value:
+                  algorithm: ecdsa
+                  ec_curve: prime256v1
+      responses:
+        '200':
+          description: Key pair generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadResponse'
+        '500':
+          description: Key generation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/csr/create:
+    post:
+      tags:
+        - CSR
+      summary: Create a Certificate Signing Request
+      description: |
+        Create a CSR for submission to a Certificate Authority.
+        Can use a previously generated key via download_id or generates a new one.
+      operationId: createCSR
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCSRRequest'
+            examples:
+              withNewKey:
+                summary: Create CSR with new key
+                value:
+                  subject:
+                    common_name: www.example.com
+                    organization: Example Inc
+                    country: US
+                  san_dns:
+                    - www.example.com
+                    - example.com
+              withExistingKey:
+                summary: Use previously generated key
+                value:
+                  private_key_download_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                  subject:
+                    common_name: www.example.com
+      responses:
+        '200':
+          description: CSR created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadResponse'
+        '404':
+          description: Referenced private key not found
+        '500':
+          description: CSR creation failed
+
+  /api/v1/certificates/self-signed:
+    post:
+      tags:
+        - Certificates
+      summary: Create a self-signed certificate
+      description: |
+        Create a self-signed certificate for development or testing.
+        Automatically generates private key and certificate.
+      operationId: createSelfSigned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelfSignedCertRequest'
+            examples:
+              localhost:
+                summary: Certificate for localhost
+                value:
+                  subject:
+                    common_name: localhost
+                  algorithm: rsa
+                  key_size: 2048
+                  validity_days: 365
+                  san_dns:
+                    - localhost
+                  san_ip:
+                    - "127.0.0.1"
+              domain:
+                summary: Certificate for domain
+                value:
+                  subject:
+                    common_name: myapp.local
+                    organization: My Company
+                    country: US
+                  validity_days: 365
+                  san_dns:
+                    - myapp.local
+                    - www.myapp.local
+      responses:
+        '200':
+          description: Certificate created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadResponse'
+        '500':
+          description: Certificate creation failed
+
+  /api/v1/certificates/ca:
+    post:
+      tags:
+        - Certificates
+      summary: Create a CA certificate
+      description: Create a Certificate Authority for signing other certificates
+      operationId: createCA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCARequest'
+            examples:
+              rootCA:
+                summary: Root CA
+                value:
+                  subject:
+                    common_name: My Root CA
+                    organization: My Company
+                    country: US
+                  algorithm: rsa
+                  key_size: 4096
+                  validity_days: 3650
+      responses:
+        '200':
+          description: CA certificate created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadResponse'
+        '500':
+          description: CA creation failed
+
+  /api/v1/certificates/sign:
+    post:
+      tags:
+        - Certificates
+      summary: Sign a CSR with CA
+      description: |
+        Sign a Certificate Signing Request using a CA certificate.
+        Both CSR and CA must be referenced by their download IDs from previous operations.
+      operationId: signCSR
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignCSRRequest'
+            examples:
+              sign:
+                summary: Sign a CSR
+                value:
+                  csr_download_id: "csr-uuid-here"
+                  ca_download_id: "ca-uuid-here"
+                  validity_days: 365
+      responses:
+        '200':
+          description: Certificate signed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadResponse'
+        '404':
+          description: CSR or CA not found
+        '500':
+          description: Signing failed
+
+  /download/{file_id}/{filename}:
+    get:
+      tags:
+        - Downloads
+      summary: Download a certificate file
+      description: |
+        Download a generated certificate file.
+        Links expire after 60 minutes.
+      operationId: downloadFile
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The download ID returned from certificate operations
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+          description: |
+            The filename to download. Available files:
+            - certificate.crt
+            - private.key
+            - ca.crt
+            - request.csr
+            - certificates.zip
+      responses:
+        '200':
+          description: File download
+          content:
+            application/x-x509-ca-cert:
+              schema:
+                type: string
+                format: binary
+            application/x-pem-file:
+              schema:
+                type: string
+                format: binary
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: File not found or expired
+        '410':
+          description: File has expired
+
+  /health:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  openssl_version:
+                    type: string
+                    example: "OpenSSL 3.0.2 15 Mar 2022"
+
+components:
+  schemas:
+    SubjectInfo:
+      type: object
+      required:
+        - common_name
+      properties:
+        common_name:
+          type: string
+          description: Domain name or entity name (CN)
+          example: www.example.com
+        organization:
+          type: string
+          description: Organization name (O)
+          example: Example Inc
+        organizational_unit:
+          type: string
+          description: Department name (OU)
+          example: IT Department
+        country:
+          type: string
+          maxLength: 2
+          description: 2-letter country code (C)
+          example: US
+        state:
+          type: string
+          description: State or Province (ST)
+          example: California
+        locality:
+          type: string
+          description: City (L)
+          example: San Francisco
+        email:
+          type: string
+          format: email
+          description: Email address
+          example: admin@example.com
+
+    GenerateKeyRequest:
+      type: object
+      properties:
+        algorithm:
+          type: string
+          enum: [rsa, ecdsa]
+          default: rsa
+          description: Key algorithm
+        key_size:
+          type: integer
+          enum: [2048, 4096]
+          default: 2048
+          description: RSA key size in bits
+        ec_curve:
+          type: string
+          enum: [prime256v1, secp384r1, secp521r1]
+          default: prime256v1
+          description: ECDSA curve name
+
+    CreateCSRRequest:
+      type: object
+      required:
+        - subject
+      properties:
+        private_key_download_id:
+          type: string
+          format: uuid
+          description: Download ID from previous key generation (optional - new key generated if not provided)
+        subject:
+          $ref: '#/components/schemas/SubjectInfo'
+        san_dns:
+          type: array
+          items:
+            type: string
+          description: Subject Alternative Names - DNS entries
+          example: ["www.example.com", "example.com"]
+        san_ip:
+          type: array
+          items:
+            type: string
+          description: Subject Alternative Names - IP addresses
+          example: ["192.168.1.1"]
+
+    SelfSignedCertRequest:
+      type: object
+      required:
+        - subject
+      properties:
+        subject:
+          $ref: '#/components/schemas/SubjectInfo'
+        algorithm:
+          type: string
+          enum: [rsa, ecdsa]
+          default: rsa
+        key_size:
+          type: integer
+          enum: [2048, 4096]
+          default: 2048
+        ec_curve:
+          type: string
+          enum: [prime256v1, secp384r1, secp521r1]
+          default: prime256v1
+        validity_days:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          default: 365
+          description: Certificate validity in days
+        san_dns:
+          type: array
+          items:
+            type: string
+          description: DNS names for Subject Alternative Name
+        san_ip:
+          type: array
+          items:
+            type: string
+          description: IP addresses for Subject Alternative Name
+
+    CreateCARequest:
+      type: object
+      required:
+        - subject
+      properties:
+        subject:
+          $ref: '#/components/schemas/SubjectInfo'
+        algorithm:
+          type: string
+          enum: [rsa, ecdsa]
+          default: rsa
+        key_size:
+          type: integer
+          enum: [2048, 4096]
+          default: 4096
+          description: Recommended 4096 for CA
+        validity_days:
+          type: integer
+          minimum: 365
+          maximum: 7300
+          default: 3650
+          description: CA validity (default 10 years)
+
+    SignCSRRequest:
+      type: object
+      required:
+        - csr_download_id
+        - ca_download_id
+      properties:
+        csr_download_id:
+          type: string
+          format: uuid
+          description: Download ID of the CSR to sign
+        ca_download_id:
+          type: string
+          format: uuid
+          description: Download ID of the CA certificate and key
+        validity_days:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          default: 365
+          description: Signed certificate validity in days
+
+    FileInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Filename
+          example: certificate.crt
+        description:
+          type: string
+          description: Human-readable description
+          example: SSL/TLS Certificate
+        url:
+          type: string
+          format: uri
+          description: Download URL
+          example: http://localhost:8000/download/abc123/certificate.crt
+
+    DownloadResponse:
+      type: object
+      description: Response containing download links for generated files
+      properties:
+        message:
+          type: string
+          description: Success message
+          example: Created self-signed certificate for myapp.local
+        download_id:
+          type: string
+          format: uuid
+          description: Unique ID for this set of files
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileInfo'
+          description: List of available files to download
+        expires_in_minutes:
+          type: integer
+          description: Minutes until download links expire
+          example: 60
+        instructions:
+          type: string
+          description: Usage instructions or security reminders
+          example: Keep your private key secure and never share it!
+
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+          description: Error message
+          example: Certificate creation failed

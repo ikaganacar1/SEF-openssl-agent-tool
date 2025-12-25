@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  openssl-agent:
+    build: .
+    container_name: openssl-certificate-agent
+    ports:
+      - "8025:8025"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - BASE_URL=http://10.67.67.50:8025  
+    volumes:
+      - cert-storage:/tmp/cert-storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8025/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  cert-storage:
