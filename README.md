@@ -2,6 +2,10 @@
 
 This repository contains the backend service for an AI agent designed to manage SSL/TLS certificates. It wraps OpenSSL functionalities into a REST API, allowing an AI to generate Private Keys, CSRs, and Certificates securely.
 
+<br>
+
+This tool is esspecially designed to use with Havelsan's opensource agentic workflow chatbot platform [Şef](https://github.com/limanmys/sef). 
+
 ## How It Works
 
 Instead of passing sensitive certificate data through the LLM context window, this service handles the cryptographic operations locally.
